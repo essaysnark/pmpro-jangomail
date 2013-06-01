@@ -273,7 +273,7 @@ function pmprojm_option_jmpassword()
 		$jmpassword = $options['jmpassword'];
 	else
 		$jmpassword = "";
-	echo "<input id='pmprojm_password' name='pmprojm_options[jmpassword]' size='80' type='text' value='" . esc_attr($jmpassword) . "' />";
+	echo "<input id='pmprojm_password' name='pmprojm_options[jmpassword]' size='80' type='password' value='" . esc_attr($jmpassword) . "' />";
 }
 
 function pmprojm_option_jmusers_lists()
@@ -379,6 +379,8 @@ function pmprojm_admin_add_page()
 }
 add_action('admin_menu', 'pmprojm_admin_add_page');
 
+
+
 //html for options page
 function pmprojm_options_page()
 {
@@ -389,7 +391,10 @@ function pmprojm_options_page()
 	//check for a valid JangoMail account username and password 
 	$options = get_option("pmprojm_options");	
 	$username = $options['jmusername'];
+	
 	$password = $options['jmpassword'];
+
+	
 	if(!empty($username) || !empty($password))
 	{
 		/** Ping the JangoMail API to make sure the credentials are valid */
@@ -454,7 +459,7 @@ function pmprojm_options_page()
 	<form action="options.php" method="post">
 		
 		<p>This plugin will integrate your site with JangoMail. You can choose one or more JangoMail lists to have users subscribed to when they sign up for a membership or are added to your site. Your JangoMail lists need to have custom fields called firstname and lastname added and then the user's name will be saved along with email address, otherwise only email address is saved in JangoMail.</p>
-		<p>Be sure to turn on the JangoMail Prevent Duplicates setting on each of your lists or else this plugin may the same person to the list more than once when you change their PMPro levels. We will try to update the plugin in the future to cover this.</p>
+		<p>Be sure to turn on the JangoMail Prevent Duplicates setting on each of your lists or else this plugin may add the same person to the list more than once when you change their PMPro levels. We will try to update the plugin in the future to cover this.</p>
 
 		
 		<?php settings_fields('pmprojm_options'); ?>
