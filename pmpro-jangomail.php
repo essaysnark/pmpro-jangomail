@@ -3,8 +3,8 @@
 Plugin Name: PMPro JangoMail Integration
 Plugin URI: http://essaysnark.com
 Description: Add new WordPress members to JangoMail lists.
-Version: 0.1
-Author: EssaySnark Tech
+Version: 0.3
+Author: essaysnark
 Author URI: http://essaysnark.com
 */
 /*
@@ -12,6 +12,14 @@ Author URI: http://essaysnark.com
 	Based on Stranger Studios' PMPro-MailChimp integration (thanks Jason!)
 	Also see www.jangosmtp.com/developers.asp 
 	GPLv2 Full license details in license.txt
+*/
+
+
+/*
+	This plugin not working on localhost
+	Also not sending firstname/lastname to JangoMail when captured through PayPal Express function
+	0.2 Now checks the list to see if user exists there before adding them
+	0.3 deletes users from lists when deleted from WP
 */
 
 //init
@@ -22,8 +30,10 @@ function pmprojm_init()
 	
 	//set up hooks for new users	
 	if(!empty($options['jmusers_lists']))
+	{
 		add_action("user_register", "pmprojm_user_register");
-	
+		add_action("delete_user", "pmprojm_delete_user");
+	}
 	//setup hooks for PMPro levels
 	pmprojm_getPMProLevels();
 	global $pmprojm_levels;
@@ -31,14 +41,29 @@ function pmprojm_init()
 	{		
 		add_action("pmpro_after_change_membership_level", "pmprojm_pmpro_after_change_membership_level", 10, 2);
 	}
+	
+	
+	if(!function_exists('_log')){
+  function _log( $message ) {
+    if( WP_DEBUG === true ){
+      if( is_array( $message ) || is_object( $message ) ){
+        error_log( print_r( $message, true ) );
+      } else {
+        error_log( $message );
+      }
+    }
+  }
+}
 }
 add_action("init", "pmprojm_init");
 
 //subscribe users when they register
 //This code subscribes ALL new users added to WP to the specified lists regardless of how they are added.
-function pmprojm_user_register($user_id, $selected_lists) {
+function pmprojm_user_register($user_id, $selected_lists) 
+{
+
 	// create a SoapClient object for the JangoMail API
-	$client = new SoapClient('https://api.jangomail.com/api.asmx?WSDL');		
+	$client = new SoapClient('https://api.jangomail.com/api.asmx?WSDL');
 	
 	$options = get_option("pmprojm_options");
 	$pmprojm_lists = get_option("pmprojm_all_lists");
@@ -50,11 +75,11 @@ function pmprojm_user_register($user_id, $selected_lists) {
 		//get user info
 		$list_user = get_userdata($user_id);
 		
+		$fieldnames = array('firstname','lastname');
+		$uservalues = array($list_user->user_firstname, $list_user->user_lastname);
+		
 		foreach($selected_lists as $currlist)
 		{
-			$fieldnames =array(firstname,lastname);
-			$uservalues = array($list_user->user_firstname, $list_user->user_lastname);
-			
 			//subscribe them
 			$newuserreg=array(
 				'Username'=>$options['jmusername'],
@@ -64,12 +89,85 @@ function pmprojm_user_register($user_id, $selected_lists) {
 				'FieldNames'=>$fieldnames,
 				'FieldValues'=>$uservalues
 			); 
+			pmprojm_add_to_list($newuserreg);
+		}
+	}
+}
 
+function pmprojm_add_to_list($newuserreg)
+{
+	// create a SoapClient object for the JangoMail API
+	$client = new SoapClient('https://api.jangomail.com/api.asmx?WSDL');
+	
+	$xmlResult = new stdClass;
+	unset($xmlResult); 
+	try
+	{
+		$xmlResult = $client->IsMemberInGroup($newuserreg);
+	}
+	catch(SoapFault $e)
+	{
+		echo $client->__getLastRequest();
+	}	
+
+	if($xmlResult->IsMemberInGroupResult)
+	{
+		_log('IsMemberInGroupResult in object xmlResult in add to list is boolean true.');
+	} else
+	{
+		_log('IsMemberInGroupResult in object xmlResult in add to list is boolean false.');
+		unset($xmlResult); 
+		try
+		{
+			$xmlResult = $client->AddGroupMember($newuserreg);
+		}
+		catch(SoapFault $e)
+		{
+			echo $client->__getLastRequest();
+		}
+	} 
+}
+
+// get rid of user from JangoMail lists 
+function pmprojm_delete_user($user_id) 
+{
+	// create a SoapClient object for the JangoMail API
+	$client = new SoapClient('https://api.jangomail.com/api.asmx?WSDL');		
+	
+	$options = get_option("pmprojm_options");
+	$pmprojm_lists = get_option("pmprojm_all_lists");
+
+	$list_user = get_userdata($user_id);
+	$xmlResult = stdClass;
+
+	foreach($pmprojm_lists as $list)
+	{
+		unset($xmlResult); 
+		//unsubscribe them
+		$deleteme=array(
+			'Username'=>$options['jmusername'],
+			'Password'=>$options['jmpassword'],
+			'GroupName'=>$list,
+			'EmailAddress'=>$list_user->user_email
+		); 
+		
+		try
+		{
+			$xmlResult = $client->IsMemberInGroup($newuserreg);
+		}
+		catch(SoapFault $e)
+		{
+			echo $client->__getLastRequest();
+		}	
+
+		if($xmlResult->IsMemberInGroupResult)
+		{
+			_log('IsMemberInGroupResult in object xmlResult in deletefrom list is boolean true.');
+			unset($xmlResult); 
 			try
 			{
-				//only add user if they're not already in there - not working right now
-		//		if(IsMemberInGroup($newuserreg) === false)	
-					$myresult = $client->AddGroupMember($newuserreg);
+				//only delete user if they're not already in there
+				$xmlResult = $client->IsMemberInGroup($deleteme);	
 			}
 			catch(SoapFault $e)
 			{
@@ -80,25 +178,24 @@ function pmprojm_user_register($user_id, $selected_lists) {
 }
 
 
-
 //subscribe new members (PMPro) when they register
 function pmprojm_pmpro_after_change_membership_level($level_id, $user_id)
 {
 	global $pmprojm_levels;
 	$options = get_option("pmprojm_options");
 	$all_lists = get_option("pmprojm_all_lists");	
-	$client = new SoapClient('https://api.jangomail.com/api.asmx?WSDL');		
 		
 	if(!empty($options['level_' . $level_id . '_lists']) && !empty($options['jmusername']) && !empty($options['jmpassword']))
 	{
 		//get user info
 		$list_user = get_userdata($user_id);
 		
+		// custom JangoMail fields, they will need to be added to each list manually before this will work
+		$fieldnames = array(firstname,lastname);
+		$uservalues = array($list_user->user_firstname, $list_user->user_lastname);		
+		
 		foreach($options['level_' . $level_id . '_lists'] as $currlist) //
-		{
-			$fieldnames =array(firstname,lastname);
-			$uservalues = array($list_user->user_firstname, $list_user->user_lastname);
-			
+		{		
 			//subscribe them
 			$newuserreg=array(
 				'Username'=>$options['jmusername'],
@@ -108,18 +205,7 @@ function pmprojm_pmpro_after_change_membership_level($level_id, $user_id)
 				'FieldNames'=>$fieldnames,
 				'FieldValues'=>$uservalues				
 			); 
-			
-			try
-			{
-				//only add user if they're not already in there - not working right now
-		//		if(IsMemberInGroup($newuserreg) === false)	
-
-					$myresult = $client->AddGroupMember($newuserreg);
-			}
-			catch(SoapFault $e)
-			{
-				echo $client->__getLastRequest();
-			}	
+			pmprojm_add_to_list($newuserreg);			
 		}
 	} elseif(!empty($options['jmusername']) && !empty($options['jmpassword']) && count($options) > 3)
 	{
@@ -131,9 +217,6 @@ function pmprojm_pmpro_after_change_membership_level($level_id, $user_id)
 			
 			foreach($options['jmusers_lists'] as $currlist) 
 			{
-				$fieldnames =array(firstname,lastname);
-				$uservalues = array($list_user->user_firstname, $list_user->user_lastname);
-				
 				//subscribe them
 				$newuserreg=array(
 					'Username'=>$options['jmusername'],
@@ -144,17 +227,7 @@ function pmprojm_pmpro_after_change_membership_level($level_id, $user_id)
 					'FieldValues'=>$uservalues
 				); 
 
-				try
-				{
-				//only add user if they're not already in there - not working right now
-			//		if(IsMemberInGroup($newuserreg) === false)					
-						$myresult = $client->AddGroupMember($newuserreg);
-				}
-				catch(SoapFault $e)
-				{
-					echo $client->__getLastRequest();
-				}	
-			}
+				pmprojm_add_to_list($newuserreg);		
 			
 			//unsubscribe from any list not assigned to users
 			/* Taking this out because there could be other lists on JangoMail that are managed separately, outside of this WP plugin */
@@ -165,9 +238,11 @@ function pmprojm_pmpro_after_change_membership_level($level_id, $user_id)
 					$api->listUnsubscribe($list['id'], $list_user->user_email);
 			} 
 			*/
+			}
 		}
 	}
 }
+
 
 //registers settings for JangoMail integration
 function pmprojm_admin_init()
